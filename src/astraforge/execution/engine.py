@@ -438,6 +438,7 @@ class Engine:
             run_id=run.run_id,
             task_id=task.task_id,
             env=self._tool_env(),
+            granted=frozenset(self.policy.granted),
         )
         # Snapshot the workspace so files a tool creates indirectly - e.g. a
         # script run through shell.run that writes a report - are still

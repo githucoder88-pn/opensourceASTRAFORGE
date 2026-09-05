@@ -86,6 +86,39 @@ normally. The property is *"no interpreter you did not ask for"*, not *"a shell
 can never run"*. Treat plan files as executable input and review them with
 `--dry-run`.
 
+### Network egress is capability-gated in the kernel
+
+A shell can open a socket no matter what its tool declaration says. Checking
+`network.request` at the policy layer while letting `sh -c "curl ..."` through
+would be theatre, so the check is enforced where it cannot be argued with.
+
+When the executing task has **not** been granted `network.request`, the child
+process is placed in an empty Linux network namespace (`CLONE_NEWNET` via
+unprivileged `CLONE_NEWUSER`). It has no interfaces except loopback, so egress
+is impossible — not filtered, absent. Granting `network.request` lifts it.
+
+The active level is recorded on every shell call as `sandbox.applied` evidence
+and in `output.isolation`, so a report reader can see what was enforced rather
+than trusting that something was.
+
+Resource limits are applied in the same step: `RLIMIT_NPROC` (fork bombs),
+`RLIMIT_AS` (memory), `RLIMIT_FSIZE` (disk) and `RLIMIT_CORE`.
+
+**If isolation cannot be applied, the child dies.** It never silently falls
+through to an unconfined `exec`.
+
+### What isolation does NOT cover
+
+- **Host filesystem reads are not confined.** A shell can still read
+  `/etc/passwd` or any file the user can read. Confining that needs a mount
+  namespace with a pivoted root, which requires privileges or a helper such as
+  `bwrap` that is not guaranteed present. Use the container image when the
+  workload is untrusted.
+- **Namespaces are Linux-only** and need unprivileged user namespaces enabled.
+  On macOS, or where they are disabled, AstraForge degrades to resource limits
+  only, records the downgrade in the evidence, and says so in
+  `astraforge tools`. A missing sandbox must never look like a working one.
+
 ### Secret handling
 
 - Config stores the **name** of an environment variable, never a value.

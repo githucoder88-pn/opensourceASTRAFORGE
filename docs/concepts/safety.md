@@ -168,3 +168,34 @@ Or use the container:
 ```bash
 docker run --rm -it --network=none -v "$PWD/out:/work" astraforge run "goal" -y
 ```
+
+
+## Network egress is enforced, not merely declared
+
+`shell.run` declares `shell.execute`, but a shell can open sockets — so the
+declaration understates what the tool can do. Gating `network.request` only in
+the policy would leave `sh -c "curl ..."` as an open back door.
+
+AstraForge therefore confines the child process itself. Without a
+`network.request` grant, the command runs in an empty network namespace:
+
+```console
+$ astraforge run "..." -y        # default policy, no network grant
+# shell.run output.isolation == "network-namespace"
+# a socket connect inside the task fails: there is no interface to use
+```
+
+Grant the capability and the confinement lifts:
+
+```yaml
+security:
+  capabilities: [filesystem.read, filesystem.write, shell.execute, network.request]
+```
+
+Every shell call records a `sandbox.applied` evidence entry naming the level
+that was active, so the report shows what was enforced.
+
+**Honest limits.** Host filesystem *reads* are still possible; only egress and
+resource use are confined. Namespaces are Linux-only, and where they are
+unavailable AstraForge falls back to resource limits and records the downgrade
+rather than pretending. See [SECURITY.md](../../SECURITY.md).

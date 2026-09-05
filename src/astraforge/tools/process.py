@@ -22,6 +22,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from astraforge.security.sandbox import (
+    SandboxReport,
+    SandboxSpec,
+    build_preexec,
+    probe_support,
+)
+
 #: Per-stream capture limit. Output beyond this is discarded, keeping the tail.
 DEFAULT_MAX_CAPTURE = 20_000
 
@@ -43,6 +50,8 @@ class ProcessResult:
     stderr: str
     stdout_truncated: bool = False
     stderr_truncated: bool = False
+    #: What isolation was actually applied, for the evidence trail.
+    sandbox: SandboxReport | None = None
 
     @property
     def truncated(self) -> bool:
@@ -114,6 +123,7 @@ def run_bounded(
     timeout_s: int,
     max_capture: int = DEFAULT_MAX_CAPTURE,
     max_stream_bytes: int = DEFAULT_MAX_STREAM_BYTES,
+    sandbox: SandboxSpec | None = None,
 ) -> ProcessResult:
     """Run ``argv`` with bounded memory use.
 
@@ -121,6 +131,13 @@ def run_bounded(
     if the binary is missing, and :class:`OutputLimitExceeded` if the child floods
     a stream past ``max_stream_bytes``.
     """
+    # Isolation is applied in the forked child, before exec. If it cannot be
+    # applied the child raises and dies rather than running unconfined.
+    preexec, sandbox_report = build_preexec(
+        sandbox if sandbox is not None else SandboxSpec.unrestricted(),
+        probe_support(),
+    )
+
     # argv list, never shell=True
     proc = subprocess.Popen(
         argv,
@@ -130,6 +147,7 @@ def run_bounded(
         stderr=subprocess.PIPE,
         stdin=subprocess.DEVNULL,
         start_new_session=True,
+        preexec_fn=preexec,
     )
 
     def _terminate() -> None:
@@ -174,4 +192,5 @@ def run_bounded(
         stderr=err_reader.text(),
         stdout_truncated=out_reader.truncated,
         stderr_truncated=err_reader.truncated,
+        sandbox=sandbox_report,
     )

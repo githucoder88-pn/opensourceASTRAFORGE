@@ -6,6 +6,10 @@ project's central claim — verified work, not asserted work — is no longer tr
 
 from __future__ import annotations
 
+import sys
+
+import pytest
+
 from astraforge.core.approvals import ScriptedGate
 from astraforge.models.core import (
     FailureClass,
@@ -21,6 +25,8 @@ from astraforge.models.events import EventType
 from astraforge.planning.static import StaticPlanner
 from astraforge.policies.policy import Policy
 from astraforge.security.capabilities import Capability
+from astraforge.security.sandbox import probe_support
+from astraforge.tools.base import Tool, ToolContext, ToolResult
 
 
 def _plan(*tasks: Task) -> Plan:
@@ -431,3 +437,83 @@ class TestApprovalVerifierGuidance:
         engine.policy = Policy()
         engine.approval_gate = ScriptedGate(decisions={"t_approve": True})
         assert engine.run(goal).tasks[0].status is TaskStatus.COMPLETED
+
+
+class TestSandboxIntegration:
+    """Audit regression: the policy grant must reach the tool that needs it.
+
+    `shell.run` confines network egress based on `ToolContext.granted`. If the
+    engine stopped populating that set, every shell would silently run with the
+    weakest possible confinement while all other tests still passed.
+    """
+
+    NET_PROBE = (
+        "import socket\n"
+        "try:\n"
+        "    s = socket.socket(); s.settimeout(4); s.connect(('1.1.1.1', 53)); s.close()\n"
+        "    print('REACHED')\n"
+        "except Exception:\n"
+        "    print('BLOCKED')"
+    )
+
+    def _shell_task(self, script: str) -> Task:
+        return Task(
+            task_id="t_shell",
+            description="run a shell command",
+            tool="shell.run",
+            tool_input={"command": [sys.executable, "-c", script]},
+            risk=RiskLevel.HIGH,
+        )
+
+    def test_engine_passes_granted_capabilities_to_tools(
+        self, make_engine, goal: Goal
+    ) -> None:
+        """The wiring itself, asserted directly rather than via a side effect."""
+        seen: dict[str, frozenset] = {}
+
+        class Probe(Tool):
+            name = "probe.capabilities"
+            description = "records the capabilities it was given"
+            capabilities = frozenset({Capability.FILESYSTEM_READ})
+            risk = RiskLevel.LOW
+
+            def run(self, payload: dict, ctx: ToolContext) -> ToolResult:
+                seen["granted"] = ctx.granted
+                return ToolResult.success({"ok": True})
+
+        task = Task(
+            task_id="t_probe", description="probe", tool="probe.capabilities", tool_input={}
+        )
+        engine = make_engine(StaticPlanner(plan=_plan(task)))
+        engine.tools.register(Probe())
+        engine.run(goal)
+
+        assert "granted" in seen, "tool never ran"
+        assert seen["granted"] == frozenset(engine.policy.granted)
+        assert Capability.SHELL_EXECUTE in seen["granted"]
+
+    @pytest.mark.skipif(
+        not probe_support().network_namespaces,
+        reason="unprivileged network namespaces unavailable",
+    )
+    def test_shell_is_network_confined_under_the_default_policy(
+        self, make_engine, goal: Goal
+    ) -> None:
+        engine = make_engine(StaticPlanner(plan=_plan(self._shell_task(self.NET_PROBE))))
+        result = engine.run(goal)
+
+        call = result.tasks[0].attempts[-1].tool_call
+        assert call is not None
+        assert "BLOCKED" in call.output["stdout"]
+        assert call.output["isolation"] == "network-namespace"
+
+    def test_granting_network_lifts_the_confinement(
+        self, make_engine, goal: Goal
+    ) -> None:
+        engine = make_engine(StaticPlanner(plan=_plan(self._shell_task(self.NET_PROBE))))
+        engine.policy = engine.policy.grant(Capability.NETWORK_REQUEST)
+        result = engine.run(goal)
+
+        call = result.tasks[0].attempts[-1].tool_call
+        assert call is not None
+        assert call.output["isolation"] != "network-namespace"

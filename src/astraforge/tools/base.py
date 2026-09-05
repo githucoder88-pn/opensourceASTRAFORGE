@@ -25,6 +25,14 @@ class ToolContext:
     run_id: str
     task_id: str
     env: dict[str, str] = field(default_factory=dict)
+    #: Capabilities the policy granted for this call. A tool that can exceed its
+    #: own declared capabilities (a shell can open sockets) uses this to confine
+    #: itself to what was actually authorised.
+    granted: frozenset[Capability] = field(default_factory=frozenset)
+
+    def has(self, capability: Capability) -> bool:
+        """True if ``capability`` was granted for this call."""
+        return capability in self.granted
 
 
 @dataclass

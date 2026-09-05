@@ -19,6 +19,7 @@ from typing import Any
 from astraforge.models.core import Evidence, FailureClass, RiskLevel
 from astraforge.security.capabilities import Capability
 from astraforge.security.redaction import redact
+from astraforge.security.sandbox import SandboxSpec
 from astraforge.tools.base import Tool, ToolContext, ToolResult
 from astraforge.tools.interpreter import resolve_interpreter
 from astraforge.tools.process import (
@@ -63,12 +64,19 @@ class ShellTool(Tool):
         timeout = int(payload.get("timeout_s", self.timeout_s))
         expected = int(payload.get("expect_exit_code", 0))
 
+        # A shell can open sockets regardless of what this tool declares, so
+        # network egress is confined to what the policy actually granted. This
+        # closes the hole where denying `network.request` still allowed
+        # `sh -c "curl ..."` to reach the internet.
+        sandbox = SandboxSpec(deny_network=not ctx.has(Capability.NETWORK_REQUEST))
+
         try:
             proc = run_bounded(
                 argv,
                 cwd=cwd,
                 env={**ctx.env, "PATH": ctx.env.get("PATH", "/usr/bin:/bin")},
                 timeout_s=timeout,
+                sandbox=sandbox,
             )
         except FileNotFoundError:
             return ToolResult.failure(
@@ -98,6 +106,7 @@ class ShellTool(Tool):
             "stdout": stdout,
             "stderr": stderr,
             "truncated": proc.truncated,
+            "isolation": proc.sandbox.level.value if proc.sandbox else "none",
         }
         evidence = [
             Evidence(
@@ -107,6 +116,18 @@ class ShellTool(Tool):
                 data={"exit_code": proc.exit_code},
             )
         ]
+        if proc.sandbox is not None:
+            evidence.append(
+                Evidence(
+                    kind="sandbox.applied",
+                    summary=proc.sandbox.summary,
+                    detail="; ".join(proc.sandbox.downgrades),
+                    data={
+                        "level": proc.sandbox.level.value,
+                        "network_denied": proc.sandbox.network_denied,
+                    },
+                )
+            )
         if proc.truncated:
             evidence.append(
                 Evidence(

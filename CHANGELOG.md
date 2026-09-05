@@ -7,6 +7,31 @@ Pre-1.0, breaking changes may occur in any minor release.
 
 ## [Unreleased]
 
+### Security
+
+- **`network.request` is now enforced by the kernel.** `shell.run` declares
+  `shell.execute`, but a shell can open sockets, so a policy that denied
+  `network.request` still allowed `sh -c "curl ..."` to reach the internet. The
+  capability was checked at the front door while the shell held a key to the
+  back one.
+
+  Without the grant, shell commands now run in an empty Linux network namespace
+  (unprivileged `CLONE_NEWUSER | CLONE_NEWNET`): no interfaces except loopback,
+  so egress is absent rather than filtered. Granting `network.request` lifts it.
+  Verified by a test that opens a real socket and asserts it fails.
+
+  Resource limits are applied in the same step (`RLIMIT_NPROC`, `RLIMIT_AS`,
+  `RLIMIT_FSIZE`, `RLIMIT_CORE`). If isolation cannot be applied the child dies
+  rather than running unconfined.
+
+  Every shell call records `sandbox.applied` evidence and an `isolation` field,
+  and `astraforge tools` reports what the machine can enforce — a degraded
+  sandbox must never look like a working one.
+
+  **Still not confined:** host filesystem *reads*. That needs a mount namespace
+  with a pivoted root; use the container image for untrusted workloads. Linux
+  only; other platforms degrade to resource limits and record the downgrade.
+
 ### Added
 
 - **Tamper-evident event log.** Every event now carries `seq`, `prev_hash` and
@@ -120,7 +145,7 @@ end, offline and deterministically.
 
 **Project**
 - Four reproducible examples, all run by the test suite
-- 252 tests across unit, integration and end-to-end layers
+- 270 tests across unit, integration and end-to-end layers
 - `mypy --strict` and `ruff` clean
 - Architecture, security, contribution, governance and roadmap documentation
 

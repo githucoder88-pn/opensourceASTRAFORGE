@@ -14,7 +14,7 @@ GOAL → PLAN → EXECUTION → VERIFICATION → EVIDENCE → ARTIFACT
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 
 > **Status: v0.1, early but real.** The core loop works end to end, is covered
-> by 252 tests, and every example in this README is executed by the test suite.
+> by 270 tests, and every example in this README is executed by the test suite.
 > It is not yet a finished product — see [Honest limitations](#honest-limitations).
 >
 > The GitHub Actions pipeline is written and passes locally, but sits in

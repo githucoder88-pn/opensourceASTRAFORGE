@@ -21,6 +21,7 @@ from astraforge.execution.engine import RunResult
 from astraforge.models.core import Artifact, RunStatus, TaskStatus
 from astraforge.planning.base import PlanningError
 from astraforge.reporting.report import summarise
+from astraforge.security.sandbox import describe_isolation, probe_support
 from astraforge.security.workspace import Workspace
 from astraforge.storage.run_store import RunStore
 from astraforge.tools import default_registry
@@ -483,6 +484,11 @@ def tools(
         f"[bold]approval required at/above risk:[/] "
         f"{config.security.approval_at_or_above.value}"
     )
+    # State plainly what this machine can enforce. A user must never assume a
+    # sandbox that is not actually active.
+    support = probe_support()
+    colour = "green" if support.network_namespaces else "yellow"
+    console.print(f"[bold]process isolation:[/] [{colour}]{describe_isolation()}[/]")
 
 
 @app.command()
