@@ -1,0 +1,86 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "astraforge"
+version = "0.1.0"
+description = "Open-source infrastructure for reliable AI work: goal -> plan -> execution -> verification -> evidence -> artifact."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["ai", "agents", "orchestration", "verification", "llm", "automation"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Build Tools",
+  "Typing :: Typed",
+]
+dependencies = [
+  "pydantic>=2.6,<3",
+  "typer>=0.12,<1",
+  "rich>=13.0",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+llm = ["openai>=1.30"]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "types-PyYAML>=6.0",
+]
+
+[project.scripts]
+astraforge = "astraforge.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/githucoder88-pn/opensourceASTRAFORGE"
+Repository = "https://github.com/githucoder88-pn/opensourceASTRAFORGE"
+Issues = "https://github.com/githucoder88-pn/opensourceASTRAFORGE/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/astraforge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = ["slow: tests that spawn subprocesses or take noticeable time"]
+
+[tool.ruff]
+line-length = 95
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "RUF", "S"]
+ignore = ["S603", "S607", "RUF012"]
+
+[tool.ruff.lint.per-file-ignores]
+# Typer's declarative API requires calling Option()/Argument() in defaults.
+"src/astraforge/cli/main.py" = ["B008"]
+# S101 assert, S108 /tmp paths, S105/S106 fake credentials used as test fixtures.
+"tests/*" = ["S101", "S105", "S106", "S108"]
+"examples/*" = ["S101"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src/astraforge"]
+strict = true
+warn_unreachable = true
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = ["yaml", "openai"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["src/astraforge"]
+branch = true

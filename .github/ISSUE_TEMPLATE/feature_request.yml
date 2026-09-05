@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest a capability or improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you hitting?
+      description: >
+        Describe the concrete situation, not the solution. Real use cases move
+        the roadmap; "it would be cool if" generally does not.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Verification
+        - Tools
+        - Planning
+        - Providers / models
+        - Security & permissions
+        - CLI / developer experience
+        - Evidence & reporting
+        - Integrations (MCP, GitHub, browser)
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: How would success be verified?
+      description: >
+        AstraForge's core principle is that completion must be checkable. If
+        this feature produces work, how would a verifier confirm it worked?
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: >
+            This strengthens reliable, verifiable work execution (rather than
+            moving AstraForge toward being a chatbot, prompt library or RAG tool).
+          required: true

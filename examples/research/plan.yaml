@@ -1,0 +1,148 @@
+# Research: gather sources -> synthesise -> verify every claim is cited.
+#
+# The interesting part is the LAST task: a citation checker that fails the run
+# if the synthesis contains a claim with no source reference. That is the
+# research equivalent of a failing test, and it is what stops a model from
+# fabricating citations.
+#
+#   astraforge run "Summarise verification approaches for AI agents" \
+#       --plan examples/research/plan.yaml -y
+#
+# NOTE: sources.json here is a fixed, offline fixture so the example is
+# reproducible. A networked source-collection tool is future work (see ROADMAP).
+
+assumptions:
+  - Sources are supplied as an offline fixture; no network access is used.
+  - Every claim in the synthesis must reference a source id.
+objectives:
+  - Produce a synthesis in which every claim is traceable to a source.
+risk: LOW
+
+tasks:
+  - task_id: task_sources
+    description: Record the source set under review.
+    tool: fs.write
+    expected_output: sources.json listing each source with an id
+    tool_input:
+      path: sources.json
+      content: |
+        {
+          "topic": "Verification approaches for autonomous AI agents",
+          "sources": [
+            {
+              "id": "S1",
+              "title": "Unit and integration testing as an agent success signal",
+              "claim": "Executing a project's existing test suite gives a binary, reproducible completion signal."
+            },
+            {
+              "id": "S2",
+              "title": "Static analysis in automated program repair",
+              "claim": "Type checking and linting catch defect classes that tests alone often miss."
+            },
+            {
+              "id": "S3",
+              "title": "Artifact hashing for provenance",
+              "claim": "Content hashes let a third party confirm that a recorded output matches the file on disk."
+            }
+          ]
+        }
+    verification:
+      - verifier: schema
+        description: the source set parses and declares a topic
+        params:
+          path: sources.json
+          required_keys: ["topic", "sources"]
+
+  - task_id: task_checker
+    description: Write the citation checker that will police the synthesis.
+    tool: fs.write
+    depends_on: [task_sources]
+    expected_output: check_citations.py
+    tool_input:
+      path: check_citations.py
+      content: |
+        """Fail if any claim bullet in the synthesis lacks a known source id.
+
+        This is deliberately strict: an uncited claim is treated as a defect,
+        exactly like a failing assertion.
+        """
+
+        import json
+        import re
+        import sys
+
+        with open("sources.json", encoding="utf-8") as fh:
+            known = {s["id"] for s in json.load(fh)["sources"]}
+
+        with open("synthesis.md", encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+
+        claims = [ln for ln in lines if ln.strip().startswith("- ")]
+        if not claims:
+            sys.exit("no claims found in synthesis.md")
+
+        uncited, unknown = [], []
+        for claim in claims:
+            cited = set(re.findall(r"\[(S\d+)\]", claim))
+            if not cited:
+                uncited.append(claim.strip())
+            unknown.extend(sorted(cited - known))
+
+        for claim in uncited:
+            print(f"UNCITED: {claim}")
+        for ref in unknown:
+            print(f"UNKNOWN SOURCE: {ref}")
+
+        if uncited or unknown:
+            sys.exit(f"citation check failed: {len(uncited)} uncited, {len(unknown)} unknown")
+        print(f"citation check passed: {len(claims)} claims, all cited")
+    verification:
+      - verifier: file
+        description: the checker exists
+        params:
+          path: check_citations.py
+          min_bytes: 300
+
+  - task_id: task_synthesis
+    description: Write the synthesis, citing a source for every claim.
+    tool: fs.write
+    depends_on: [task_checker]
+    expected_output: synthesis.md with fully cited claims
+    tool_input:
+      path: synthesis.md
+      content: |
+        # Verification approaches for autonomous AI agents
+
+        ## Findings
+
+        - Running an existing test suite yields a reproducible pass/fail signal that does not depend on the agent's own account of its work [S1].
+        - Static analysis complements tests by catching defect classes that behavioural tests frequently miss [S2].
+        - Hashing produced artifacts lets a reviewer confirm independently that a recorded output matches the file on disk [S3].
+
+        ## Limitations
+
+        This synthesis draws on a fixed offline source set of three items and is
+        illustrative rather than a survey of the literature.
+    verification:
+      - verifier: file
+        description: the synthesis exists and has a findings section
+        params:
+          path: synthesis.md
+          min_bytes: 200
+          contains: ["## Findings"]
+
+  - task_id: task_check_citations
+    description: Enforce that every claim in the synthesis is cited.
+    tool: shell.run
+    depends_on: [task_synthesis]
+    expected_output: the citation checker exits 0
+    risk: MEDIUM
+    tool_input:
+      command: ["python", "check_citations.py"]
+    verification:
+      - verifier: command
+        description: no uncited or fabricated citations remain
+        params:
+          command: ["python", "check_citations.py"]
+          stdout_contains: ["citation check passed", "3 claims"]
+          stdout_excludes: ["UNCITED", "UNKNOWN SOURCE", "Traceback"]
