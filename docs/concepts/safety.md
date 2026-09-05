@@ -1,0 +1,152 @@
+# Safety and bounded autonomy
+
+Autonomy without bounds is not a feature, it is a liability. AstraForge
+distinguishes read-only, reversible, destructive and external operations, and
+gates them accordingly.
+
+## Capabilities
+
+Tools declare the permissions they need as class attributes, so policy can be
+evaluated **before** anything runs:
+
+```python
+class ShellTool(Tool):
+    capabilities = frozenset({Capability.SHELL_EXECUTE})
+    risk = RiskLevel.HIGH
+    reversible = False
+```
+
+| Capability | Default | Why |
+| --- | --- | --- |
+| `filesystem.read` | granted | confined to the workspace |
+| `filesystem.write` | granted | confined to the workspace |
+| `shell.execute` | granted | needed for tests; gated at HIGH risk |
+| `model.invoke` | granted | no side effects beyond the provider |
+| `network.request` | **denied** | exfiltration, unbounded side effects |
+| `github.read` / `github.write` | **denied** | external, often irreversible |
+| `browser.read` / `browser.interact` | **denied** | external side effects |
+
+An ungranted capability produces `DENY` and the tool is **never invoked**.
+
+## Risk and approval
+
+Effective risk is `max(task.risk, tool.risk)` — a plan can escalate a low-risk
+tool without modifying the tool. At or above the threshold, execution stops and
+asks a human.
+
+```yaml
+security:
+  capabilities: [filesystem.read, filesystem.write, shell.execute, model.invoke]
+  approval_at_or_above: HIGH   # LOW | MEDIUM | HIGH | CRITICAL
+  approval_gate: console       # console | deny | auto
+```
+
+| Gate | Behaviour | Use |
+| --- | --- | --- |
+| `console` | prompts on stdin | interactive (default) |
+| `deny` | rejects everything gated | untrusted goals |
+| `auto` | approves risk gates | CI, sandboxed runs (`--yes`) |
+
+**`auto` cannot bypass a missing capability grant.** Autonomy never silently
+becomes "grant everything" — verified by
+`test_autonomous_mode_auto_approves_but_still_enforces_grants`.
+
+Approvals become evidence: `approval.required`, `approval.granted` and
+`approval.denied` are events, and the `human_approval` verifier can require one.
+
+## Containment
+
+Every path resolves through `Workspace.resolve()`, which rejects anything
+outside the run directory — `../`, absolute paths, symlink tricks. One choke
+point, one place to audit, one place to test.
+
+```python
+workspace.resolve("../../etc/passwd")   # WorkspaceEscapeError
+```
+
+## No shell injection
+
+`shell.run` takes an argv list and never uses `shell=True`:
+
+```yaml
+tool_input:
+  command: ["echo", "a; echo pwned"]   # one argument, not two commands
+```
+
+`;`, `|`, `&&` and backticks are ordinary characters.
+
+## Secrets
+
+- Config stores the **name** of an env var, never a value.
+- Redaction runs on tool output, events, reports and artifacts — matching known
+  key shapes (OpenAI, GitHub, Slack, AWS, PEM blocks) **and** the live values of
+  env vars named like `*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`,
+  `*CREDENTIAL*`.
+- Subprocesses receive a minimal environment (`PATH`, `HOME`, locale, `TMPDIR`).
+  **Your API keys are not inherited by commands the agent runs.**
+
+Redaction is defence in depth, not a guarantee. Do not point AstraForge at a
+workspace containing credentials.
+
+## Bounded execution
+
+```yaml
+limits:
+  max_task_attempts: 2
+  max_total_tool_calls: 100
+  max_runtime_s: 900
+```
+
+Additionally, failure classes carry their own recoverability. `POLICY_BLOCK`,
+`HUMAN_REJECTION`, `AUTHORIZATION_FAILURE` and `DEPENDENCY_FAILURE` are **never
+retried** — retrying only burns budget to reach the same answer.
+
+## Failure classification
+
+| Class | Recoverable | Meaning |
+| --- | --- | --- |
+| `TOOL_FAILURE` | yes | the tool reported failure |
+| `TIMEOUT` | yes | exceeded its time limit |
+| `INVALID_OUTPUT` | yes | schema violation |
+| `TEST_FAILURE` | yes | tests did not pass |
+| `ENVIRONMENT_FAILURE` | yes | missing binary, missing file |
+| `MODEL_FAILURE` | yes | the provider failed |
+| `VERIFICATION_FAILURE` | yes | evidence did not support completion |
+| `AUTHORIZATION_FAILURE` | **no** | not permitted |
+| `POLICY_BLOCK` | **no** | capability not granted |
+| `HUMAN_REJECTION` | **no** | a human said no |
+| `DEPENDENCY_FAILURE` | **no** | a prerequisite failed |
+
+Nothing is hidden: every failure is an event and appears in the report.
+
+## What is *not* protected in v0.1
+
+Stated plainly:
+
+- **`shell.run` is confined, not sandboxed.** Commands run on the host with a
+  minimal environment. They can still reach the network and read files the user
+  can read. Container isolation is v0.2.
+- **A hostile provider can return hostile plans.** Policy and verification limit
+  the blast radius; they do not eliminate it.
+- **Plan files are executable input.** Treat `--plan` like a shell script.
+  `--dry-run` prints the graph without executing.
+
+Full threat model: [SECURITY.md](../../SECURITY.md).
+
+## Running untrusted goals
+
+```yaml
+security:
+  capabilities: [filesystem.read, filesystem.write, model.invoke]  # no shell
+  approval_at_or_above: MEDIUM
+  approval_gate: console
+limits:
+  max_total_tool_calls: 25
+  max_runtime_s: 300
+```
+
+Or use the container:
+
+```bash
+docker run --rm -it --network=none -v "$PWD/out:/work" astraforge run "goal" -y
+```
