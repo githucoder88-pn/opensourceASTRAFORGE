@@ -128,9 +128,8 @@ class Engine:
         workspace = Workspace(self.store.workspace_dir(run.run_id))
 
         memory = MemoryEventSink()
-        bus = EventBus(
-            run.run_id, [memory, JsonlEventSink(self.store.events_path(run.run_id))]
-        )
+        jsonl = JsonlEventSink(self.store.events_path(run.run_id))
+        bus = EventBus(run.run_id, [memory, jsonl])
         budget = Budget(
             max_total_tool_calls=self.config.limits.max_total_tool_calls,
             max_runtime_s=self.config.limits.max_runtime_s,
@@ -173,6 +172,11 @@ class Engine:
             )
 
         run.finished_at = utcnow()
+        # Pin the event chain to the run record. The chain proves recorded
+        # history was not altered; these two fields additionally prove that no
+        # events were dropped from the end.
+        run.event_count = jsonl.chain_length
+        run.event_chain_head = jsonl.chain_head
         self.store.save_run(run)
 
         from astraforge.reporting.report import build_report  # local: avoid cycle

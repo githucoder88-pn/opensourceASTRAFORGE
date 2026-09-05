@@ -16,6 +16,7 @@ from astraforge import __version__
 from astraforge.core.approvals import AutoApproveGate, ConsoleGate, DenyAllGate
 from astraforge.core.config import CONFIG_FILENAME, Config, ConfigError
 from astraforge.core.factory import build_engine, make_goal
+from astraforge.events.bus import JsonlEventSink
 from astraforge.execution.engine import RunResult
 from astraforge.models.core import Artifact, RunStatus, TaskStatus
 from astraforge.planning.base import PlanningError
@@ -372,11 +373,22 @@ def verify(
     run_id: str = typer.Argument("latest"),
     config_path: Path | None = typer.Option(None, "--config", "-c"),
 ) -> None:
-    """Re-check a finished run: do its artifacts still match their hashes?"""
+    """Re-check a finished run: are its artifacts and its history still intact?"""
     store = _store(_load_config(config_path))
     resolved = _resolve(store, run_id)
     record = store.load_run(resolved)
     workspace = Workspace(store.workspace_dir(resolved))
+
+    # The execution log is evidence too. Verifying artifacts while ignoring the
+    # record of how they were produced would leave the more interesting target
+    # unprotected: rewriting history is how you hide a failure.
+    sink = JsonlEventSink(store.events_path(resolved))
+    chain = sink.verify()
+    # A chain prefix is internally consistent, so a hash chain alone cannot
+    # detect events dropped from the end. The run record pins the expected count.
+    truncated = (
+        record.event_count > 0 and chain.checked < record.event_count
+    )
 
     # A path may have several artifact revisions if successive tasks rewrote
     # it. Only the final revision should still be on disk; earlier ones were
@@ -414,6 +426,28 @@ def verify(
         console.print(
             f"[yellow]warning[/] task(s) with no verification: {', '.join(unverified)}"
         )
+    if chain.intact:
+        console.print(f"[green]ok[/] event log: {chain.summary}")
+    else:
+        unverifiable_only = all(
+            "written before chaining" in b.problem for b in chain.breaks
+        )
+        if unverifiable_only:
+            # An upgraded install reading an old run is not evidence of tampering.
+            console.print(
+                "[yellow]warning[/] event log predates integrity chaining "
+                "and cannot be verified"
+            )
+        else:
+            for brk in chain.breaks[:5]:
+                problems.append(f"event log: {brk}")
+
+    if truncated:
+        problems.append(
+            f"event log truncated: {chain.checked} events on disk, "
+            f"{record.event_count} recorded for this run"
+        )
+
     if problems:
         for problem in problems:
             console.print(f"[red]fail[/] {problem}")

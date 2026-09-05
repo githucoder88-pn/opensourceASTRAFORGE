@@ -209,3 +209,79 @@ def test_tools_command_shows_permissions(project: Path) -> None:
     assert result.exit_code == 0
     assert "shell.execute" in result.stdout
     assert "granted capabilities" in result.stdout
+
+
+class TestEventLogTamperDetection:
+    """`astraforge verify` must detect a rewritten execution record.
+
+    Artifacts were hash-protected from the start; the event log was not. Since
+    rewriting history is exactly how a failure would be hidden, `verify` now
+    checks the hash chain and the recorded event count.
+    """
+
+    def _run(self, project: Path) -> Path:
+        assert runner.invoke(app, ["run", "write a design note", "-y"]).exit_code == 0
+        runs = sorted((project / ".astraforge" / "runs").iterdir())
+        return runs[-1] / "events.jsonl"
+
+    @staticmethod
+    def _rows(log: Path) -> list[dict]:
+        return [json.loads(x) for x in log.read_text().splitlines() if x.strip()]
+
+    @staticmethod
+    def _write(log: Path, rows: list[dict]) -> None:
+        log.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+    def test_untouched_run_verifies(self, project: Path) -> None:
+        self._run(project)
+        result = runner.invoke(app, ["verify", "latest"])
+        assert result.exit_code == 0
+        assert "unbroken hash chain" in result.stdout
+
+    def test_edited_event_is_detected(self, project: Path) -> None:
+        log = self._run(project)
+        rows = self._rows(log)
+        rows[5]["message"] = "all tasks verified perfectly"
+        self._write(log, rows)
+
+        result = runner.invoke(app, ["verify", "latest"])
+        assert result.exit_code == 1
+        assert "event log" in result.stdout
+
+    def test_deleted_event_is_detected(self, project: Path) -> None:
+        log = self._run(project)
+        rows = self._rows(log)
+        del rows[5]
+        self._write(log, rows)
+        assert runner.invoke(app, ["verify", "latest"]).exit_code == 1
+
+    def test_reordered_events_are_detected(self, project: Path) -> None:
+        log = self._run(project)
+        rows = self._rows(log)
+        rows[5], rows[6] = rows[6], rows[5]
+        self._write(log, rows)
+        assert runner.invoke(app, ["verify", "latest"]).exit_code == 1
+
+    def test_truncated_log_is_detected(self, project: Path) -> None:
+        """A chain prefix is self-consistent, so this needs the pinned count."""
+        log = self._run(project)
+        lines = log.read_text().splitlines()
+        log.write_text("\n".join(lines[:4]) + "\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "latest"])
+        assert result.exit_code == 1
+        assert "truncated" in result.stdout
+
+    def test_artifact_and_log_tampering_are_reported_independently(
+        self, project: Path
+    ) -> None:
+        """A clean log must not mask a modified artifact, or vice versa."""
+        self._run(project)
+        runs = sorted((project / ".astraforge" / "runs").iterdir())
+        brief = next((runs[-1] / "workspace").glob("*.md"))
+        brief.write_text(brief.read_text() + "\nappended\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "latest"])
+        assert result.exit_code == 1
+        assert "unbroken hash chain" in result.stdout  # log is fine
+        assert "hash mismatch" in result.stdout  # artifact is not

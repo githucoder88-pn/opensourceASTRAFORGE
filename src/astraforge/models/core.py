@@ -298,6 +298,14 @@ class Run(StrictModel):
     human_interventions: int = 0
     notes: list[str] = Field(default_factory=list)
 
+    # Number of events written for this run. A hash chain proves that recorded
+    # history was not altered, but a *prefix* of a chain is still internally
+    # consistent, so truncating the tail would otherwise go unnoticed. Recording
+    # the expected count here closes that gap.
+    event_count: int = 0
+    #: Digest of the final event, so the whole chain can be pinned to the record.
+    event_chain_head: str = ""
+
     @property
     def duration_s(self) -> float:
         end = self.finished_at or utcnow()

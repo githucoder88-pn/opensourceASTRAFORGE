@@ -14,7 +14,7 @@ GOAL → PLAN → EXECUTION → VERIFICATION → EVIDENCE → ARTIFACT
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 
 > **Status: v0.1, early but real.** The core loop works end to end, is covered
-> by 230 tests, and every example in this README is executed by the test suite.
+> by 252 tests, and every example in this README is executed by the test suite.
 > It is not yet a finished product — see [Honest limitations](#honest-limitations).
 >
 > The GitHub Actions pipeline is written and passes locally, but sits in
@@ -99,7 +99,7 @@ Now audit it:
 astraforge inspect latest     # full proof-of-work report
 astraforge logs latest        # every structured event
 astraforge artifacts latest   # outputs with SHA-256 hashes
-astraforge verify latest      # re-check the hashes
+astraforge verify latest      # re-check artifacts AND the execution log
 ```
 
 **Try breaking it** — this is the part that matters:
@@ -107,11 +107,29 @@ astraforge verify latest      # re-check the hashes
 ```bash
 echo "I edited this myself" >> .astraforge/runs/*/workspace/brief.md
 astraforge verify latest
+# ok event log: 29 events form an unbroken hash chain
 # fail hash mismatch for brief.md: recorded 740f13d835ea…, on disk 3a1f…
 # exit code 1
 ```
 
-The evidence chain notices. That is the entire product thesis in one command.
+Now try covering your tracks by rewriting the history instead:
+
+```bash
+# edit any line in the run's events.jsonl
+astraforge verify latest
+# fail event log: event 10 (evt_027f9b30): content does not match its recorded hash
+# exit code 1
+```
+
+Every event stores the digest of the event before it, so editing, deleting,
+reordering or truncating the log breaks the chain. Artifact hashing protects the
+*outputs*; the chain protects the *story* — which is where a failed task or a
+policy block would otherwise be quietly deleted.
+
+This is tamper **evidence**, not tamper proofing: the digests are unkeyed, so
+anyone who can write to the run directory could regenerate a consistent log from
+scratch. What they cannot do is silently alter one line. See
+[SECURITY.md](SECURITY.md) for the precise threat model.
 
 ---
 

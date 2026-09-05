@@ -114,3 +114,41 @@ deletion both exit non-zero. Superseded revisions are reported, not flagged.
 Evidence raises the floor from "trust the model" to "check the record". It does
 not remove the need for judgement about whether the record checks the right
 things.
+
+
+## Integrity of the record itself
+
+Artifacts are content-addressed, so a modified output file is detected. The
+event log gets the same treatment: each event stores `seq`, `prev_hash` and
+`entry_hash`, chaining it to everything recorded before it.
+
+```
+seq 0   prev_hash = 000…0        entry_hash = H(0 | prev | event)
+seq 1   prev_hash = H(event 0)   entry_hash = H(1 | prev | event)
+seq 2   prev_hash = H(event 1)   entry_hash = H(2 | prev | event)
+```
+
+Editing event 1 changes its digest, which breaks the link stored in event 2 and
+every event after it. `astraforge verify` recomputes the whole chain:
+
+```console
+$ astraforge verify latest
+ok event log: 29 events form an unbroken hash chain
+ok brief.md
+```
+
+Rewrite any line and it fails:
+
+```console
+$ astraforge verify latest
+fail event log: event 10 (evt_027f9b30): content does not match its recorded hash
+```
+
+This matters because artifact hashing alone protects the *outputs* while leaving
+the *story* editable — and the story is where a failed task, a policy block or a
+retry would be hidden.
+
+**Limits.** The digests are unkeyed. Someone with write access to the run
+directory can regenerate a fully consistent log; what they cannot do is quietly
+alter one line. Treat it as evidence of tampering, not as a guarantee of
+authenticity.

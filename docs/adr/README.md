@@ -14,6 +14,7 @@ depends on one person's undocumented knowledge.
 | [0003](0003-filesystem-run-storage.md) | Filesystem + JSONL run storage | Accepted |
 | [0004](0004-synchronous-engine.md) | Synchronous engine in v0.1 | Accepted |
 | [0005](0005-deterministic-default-provider.md) | Deterministic offline default provider | Accepted |
+| [0006](0006-tamper-evident-event-log.md) | Hash-chain the event log | Accepted |
 
 Write a new ADR when a change alters a core abstraction, adds a required
 dependency, changes the security model, or changes the public API.

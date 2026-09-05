@@ -12,6 +12,12 @@ import sys
 from pathlib import Path
 from typing import Any, Protocol
 
+from astraforge.events.integrity import (
+    GENESIS,
+    ChainVerdict,
+    compute_entry_hash,
+    verify_chain,
+)
 from astraforge.models.events import Event, EventType
 
 
@@ -46,10 +52,59 @@ class JsonlEventSink:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._seq, self._prev_hash = self._resume_chain()
+
+    def _resume_chain(self) -> tuple[int, str]:
+        """Continue an existing chain so appends stay verifiable across processes."""
+        if not self.path.exists():
+            return 0, GENESIS
+        last: dict[str, Any] | None = None
+        count = 0
+        with self.path.open(encoding="utf-8") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                count += 1
+                try:
+                    last = json.loads(line)
+                except json.JSONDecodeError:  # pragma: no cover - corrupt tail
+                    last = None
+        if last is None or last.get("entry_hash") is None:
+            # Pre-chain or unreadable history: start a fresh chain from here.
+            # verify_chain reports the earlier events as unverifiable.
+            return count, GENESIS
+        return count, str(last["entry_hash"])
 
     def handle(self, event: Event) -> None:
+        data = event.model_dump(mode="json")
+        seq = self._seq
+        prev = self._prev_hash
+        entry_hash = compute_entry_hash(seq, prev, data)
+        data["seq"] = seq
+        data["prev_hash"] = prev
+        data["entry_hash"] = entry_hash
         with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(event.model_dump_json() + "\n")
+            fh.write(json.dumps(data, default=str) + "\n")
+        self._seq = seq + 1
+        self._prev_hash = entry_hash
+
+    @property
+    def chain_length(self) -> int:
+        """Number of events written to this log so far."""
+        return self._seq
+
+    @property
+    def chain_head(self) -> str:
+        """Digest of the most recent event, or GENESIS if none were written."""
+        return self._prev_hash
+
+    def verify(self) -> ChainVerdict:
+        """Re-derive every digest and confirm the recorded history is intact."""
+        if not self.path.exists():
+            return ChainVerdict(checked=0, breaks=[])
+        with self.path.open(encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh if line.strip()]
+        return verify_chain(rows)
 
     def read(self) -> list[Event]:
         if not self.path.exists():

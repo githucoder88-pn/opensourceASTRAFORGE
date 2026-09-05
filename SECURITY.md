@@ -106,6 +106,26 @@ can never run"*. Treat plan files as executable input and review them with
 Redaction is best-effort defence in depth, not a guarantee. Do not point
 AstraForge at a workspace containing credentials.
 
+### Tamper-evident execution history
+
+Every event in `events.jsonl` carries `seq`, `prev_hash` and `entry_hash`. Each
+digest covers the event's content, its position, and the digest of the event
+before it, so editing, deleting or reordering any event breaks the chain from
+that point onward. The run record additionally pins the expected event count and
+the final digest, which catches events dropped from the end (a chain *prefix* is
+otherwise internally consistent).
+
+`astraforge verify` checks the chain and reports a broken link, altered content
+or a truncated log as a failure, exiting non-zero.
+
+**This is tamper evidence, not tamper proofing.** The digests are unkeyed, so
+anyone who can write to the run directory can also rewrite the whole log into a
+fresh, internally consistent chain. It detects modification of a recorded
+history; it does not stop a party who controls the machine from fabricating one.
+Detecting that requires a signing key or an external timestamp authority, and
+v0.1 has neither. Logs written before this feature existed are reported as
+*unverifiable*, not as tampered.
+
 ### Bounded execution
 
 `max_task_attempts`, `max_total_tool_calls` and `max_runtime_s` are enforced by

@@ -7,6 +7,20 @@ Pre-1.0, breaking changes may occur in any minor release.
 
 ## [Unreleased]
 
+### Added
+
+- **Tamper-evident event log.** Every event now carries `seq`, `prev_hash` and
+  `entry_hash`, chaining it to all prior history. `astraforge verify` recomputes
+  the chain and fails on an edited, deleted or reordered event. The run record
+  pins the event count and final digest, so events dropped from the end are
+  caught too — a chain prefix is otherwise self-consistent.
+
+  Artifacts were hash-protected from the start while the execution log was
+  freely editable, which left the more valuable target unprotected: rewriting
+  history is how a failure would be hidden. Unkeyed digests make this tamper
+  evidence, not tamper proofing, and `SECURITY.md` says so explicitly. Logs
+  written before this change are reported as unverifiable, never as tampered.
+
 ### Fixed
 
 Findings from a pre-release independent audit.
@@ -106,7 +120,7 @@ end, offline and deterministically.
 
 **Project**
 - Four reproducible examples, all run by the test suite
-- 230 tests across unit, integration and end-to-end layers
+- 252 tests across unit, integration and end-to-end layers
 - `mypy --strict` and `ruff` clean
 - Architecture, security, contribution, governance and roadmap documentation
 

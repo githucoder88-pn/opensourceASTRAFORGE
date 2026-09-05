@@ -49,3 +49,9 @@ class Event(StrictModel):
     task_id: str | None = None
     message: str = ""
     payload: dict[str, Any] = Field(default_factory=dict)
+
+    # Tamper-evidence chain, assigned by the sink at write time. These are None
+    # in memory and populated on persistence; see astraforge.events.integrity.
+    seq: int | None = None
+    prev_hash: str | None = None
+    entry_hash: str | None = None
