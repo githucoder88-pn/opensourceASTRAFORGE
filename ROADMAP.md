@@ -18,7 +18,7 @@ Each version must leave the system usable end to end.
 - [x] Proof-of-work Markdown report
 - [x] CLI: `init`, `run`, `runs`, `inspect`, `logs`, `artifacts`, `verify`, `tools`, `cancel`
 - [x] Provider abstraction with offline `echo` and OpenAI-compatible providers
-- [x] Four reproducible examples, all executed by CI
+- [x] Four reproducible examples, all run by the test suite
 - [x] 186 tests, `mypy --strict` clean
 
 ## v0.2 — Isolation, MCP and richer evidence

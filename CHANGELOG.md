@@ -62,7 +62,7 @@ end, offline and deterministically.
 - Configuration validated at load time; secrets referenced by env-var name only
 
 **Project**
-- Four reproducible examples, all executed by CI
+- Four reproducible examples, all run by the test suite
 - 187 tests across unit, integration and end-to-end layers
 - `mypy --strict` and `ruff` clean
 - Architecture, security, contribution, governance and roadmap documentation

@@ -37,7 +37,7 @@ Practical how-tos. Each extension point is one class with one method.
 - **[Security](../SECURITY.md)** — threat model and reporting
 - **[Contributing](../CONTRIBUTING.md)** — the quality bar
 - **[Governance](../GOVERNANCE.md)** — how decisions get made
-- **[Examples](../examples/)** — four reproducible, CI-executed demos
+- **[Examples](../examples/)** — four reproducible demos, all run by the test suite
 - **[Benchmarks](../benchmarks/)** — designed, not yet run
 
 ## Integrations

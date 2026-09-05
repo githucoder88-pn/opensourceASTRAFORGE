@@ -150,7 +150,7 @@ verification:
 - `depends_on` controls order. Dependents of a failed task are `BLOCKED`, not
   silently skipped.
 - Use `--dry-run` constantly while iterating.
-- Add your plan to `examples/` with a README and it will be run by CI.
+- Add your plan to `examples/` with a README and the test suite will run it.
 
 ## Full examples
 

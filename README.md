@@ -14,8 +14,13 @@ GOAL → PLAN → EXECUTION → VERIFICATION → EVIDENCE → ARTIFACT
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 
 > **Status: v0.1, early but real.** The core loop works end to end, is covered
-> by 187 tests, and every example in this README is executed by CI. It is not
-> yet a finished product — see [Honest limitations](#honest-limitations).
+> by 187 tests, and every example in this README is executed by the test suite.
+> It is not yet a finished product — see [Honest limitations](#honest-limitations).
+>
+> The GitHub Actions pipeline is written and passes locally, but sits in
+> [`.github/workflows-pending/`](.github/workflows-pending/) — the automation
+> that opened this branch lacks permission to write `.github/workflows/`. One
+> `git mv` activates it.
 
 ---
 
@@ -156,7 +161,7 @@ bug that makes unverified agent output untrustworthy.
 
 ### More examples
 
-All four are deterministic, offline, and [executed by CI](tests/end_to_end/test_examples.py):
+All four are deterministic, offline, and [executed by the test suite](tests/end_to_end/test_examples.py):
 
 | Example | Demonstrates |
 | --- | --- |

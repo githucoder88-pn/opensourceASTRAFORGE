@@ -27,5 +27,5 @@ astraforge artifacts latest   # outputs with SHA-256 hashes
 astraforge verify latest      # re-check the hashes
 ```
 
-All four examples are executed by the test suite (`tests/end_to_end/test_examples.py`),
-so a broken example breaks CI.
+All four examples are executed by the test suite
+(`tests/end_to_end/test_examples.py`), so a broken example fails the build.
