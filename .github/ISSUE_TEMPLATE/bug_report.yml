@@ -1,0 +1,59 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. AstraForge records everything a run did, which
+        makes bugs unusually easy to diagnose — please attach the evidence.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: The exact command, and the plan file if you used one.
+      render: shell
+      placeholder: astraforge run "..." --plan my-plan.yaml -y
+    validations:
+      required: true
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Run report
+      description: >
+        Output of `astraforge inspect <run_id>`. Please skim it for anything
+        sensitive first — AstraForge redacts known secret shapes, but check.
+      render: markdown
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Event log
+      description: Relevant output from `astraforge logs <run_id>`.
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: AstraForge version
+      placeholder: "0.1.0 (astraforge --version)"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Python version and OS
+      placeholder: "Python 3.12.1, macOS 14.4"
+    validations:
+      required: true
