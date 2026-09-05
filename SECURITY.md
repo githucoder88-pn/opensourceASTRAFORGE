@@ -107,6 +107,42 @@ Resource limits are applied in the same step: `RLIMIT_NPROC` (fork bombs),
 **If isolation cannot be applied, the child dies.** It never silently falls
 through to an unconfined `exec`.
 
+### Prompt injection: the honest position
+
+**AstraForge v0.1 has no live prompt-injection channel, because it has no data
+flow from tool output back into a prompt.** Task inputs come from the validated
+plan and are never rewritten during a run. The contents of a file, a web page or
+a GitHub issue cannot reach the planner, because nothing carries them there.
+
+This is a property of the current architecture, not a defence we built, and it
+disappears the moment a feature interpolates results between tasks. It is
+therefore pinned by tests in `tests/security/test_prompt_injection.py`: adding a
+data-flow feature breaks a test rather than silently opening the hole.
+
+What *is* defended, and tested, is the case where the planner itself is hostile
+or compromised:
+
+| Attack | Outcome |
+| --- | --- |
+| Plan names an unregistered tool | Rejected at plan time |
+| Plan requests an absolute path or `../` traversal | `AUTHORIZATION_FAILURE`, nothing written |
+| Plan understates `risk` to dodge approval | Ignored — the engine uses `max(task.risk, tool.risk)` |
+| Plan uses a tool whose capability is not granted | `POLICY_BLOCK`, not retried |
+| Plan output is malformed, cyclic, or references missing tasks | `PlanningError`, nothing executes |
+| Hostile text inside the goal | Recorded as data; cannot alter policy |
+
+The load-bearing idea: **the model proposes, the engine disposes.** Capabilities
+come from configuration, never from the plan, so persuading the model buys an
+attacker nothing it did not already have.
+
+**Known future exposure.** Tool *descriptions* are sent to the planner — they
+must be, or it cannot choose a tool. Once MCP (v0.3) allows third-party servers
+to supply tool metadata, that becomes an instruction channel into the model.
+The structural mitigations above still apply (the tool must be registered, the
+plan is validated, capabilities come from config), but trust-tiering of
+third-party tool metadata is required before MCP can be considered safe. It is
+not implemented, and MCP is not shipped.
+
 ### What isolation does NOT cover
 
 - **Host filesystem reads are not confined.** A shell can still read

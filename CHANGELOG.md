@@ -7,6 +7,21 @@ Pre-1.0, breaking changes may occur in any minor release.
 
 ## [Unreleased]
 
+### Added
+
+- **Prompt-injection test suite** (`tests/security/`). The audit noted §18 had
+  zero tests. Inspection established the honest position first: v0.1 has no live
+  injection channel, because no tool output is ever interpolated into a later
+  task input or a model prompt. That is an architectural property, not a defence
+  we built, and it vanishes the moment a data-flow feature is added — so it is
+  now pinned by tests that break if the invariant is violated.
+
+  The suite also covers the realistic threat, a hostile or compromised planner:
+  unregistered tools, absolute-path and traversal writes, self-declared LOW risk
+  to dodge the approval gate, ungranted capabilities, and malformed or cyclic
+  plans. SECURITY.md documents the position, including the known future exposure
+  once MCP allows third-party tool descriptions to reach the model.
+
 ### Security
 
 - **`network.request` is now enforced by the kernel.** `shell.run` declares
@@ -145,7 +160,7 @@ end, offline and deterministically.
 
 **Project**
 - Four reproducible examples, all run by the test suite
-- 270 tests across unit, integration and end-to-end layers
+- 289 tests across unit, integration and end-to-end layers
 - `mypy --strict` and `ruff` clean
 - Architecture, security, contribution, governance and roadmap documentation
 
