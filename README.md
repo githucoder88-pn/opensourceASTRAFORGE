@@ -107,10 +107,14 @@ astraforge verify latest      # re-check artifacts AND the execution log
 ```bash
 echo "I edited this myself" >> .astraforge/runs/*/workspace/brief.md
 astraforge verify latest
+# ok approach.md
 # ok event log: 29 events form an unbroken hash chain
-# fail hash mismatch for brief.md: recorded 740f13d835ea…, on disk 3a1f…
+# fail hash mismatch for brief.md: recorded 905aba570b2b…, on disk 12d957735400…
 # exit code 1
 ```
+
+The log is intact, so the report is trustworthy — and it says the artifact was
+changed after the fact.
 
 Now try covering your tracks by rewriting the history instead:
 
