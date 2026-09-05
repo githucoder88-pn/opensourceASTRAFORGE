@@ -1,0 +1,188 @@
+# AstraForge flagship demo: fix a genuinely failing test suite.
+#
+# The plan writes a buggy module, PROVES it is broken by running the suite and
+# asserting a non-zero exit, applies the fix, then proves it is fixed by
+# requiring the suite to pass. The "it works now" claim is backed by a real
+# subprocess exit code, not by any model's say-so.
+#
+# Run it with:
+#   astraforge run "Fix the failing statistics module" \
+#       --plan examples/software_engineering/plan.yaml -y
+#
+# Everything here is deterministic and offline: no API key, no network, and no
+# dependencies beyond the Python standard library - `unittest` is used rather
+# than pytest so the demo works from a bare `pip install astraforge`.
+
+assumptions:
+  - Python 3.10+ only; `unittest` ships with the standard library.
+  - The workspace starts empty; the demo creates all of its own files.
+objectives:
+  - Reproduce a real, failing test suite.
+  - Apply a fix and prove it with a passing test run.
+risk: MEDIUM
+
+tasks:
+  - task_id: task_write_tests
+    description: Write the test suite that defines correct behaviour.
+    tool: fs.write
+    expected_output: test_stats.py containing three behavioural tests
+    tool_input:
+      path: test_stats.py
+      content: |
+        """Behavioural spec for the statistics module (stdlib unittest only)."""
+
+        import unittest
+
+        from stats import median
+
+
+        class TestMedian(unittest.TestCase):
+            def test_median_odd_length(self):
+                self.assertEqual(median([5, 1, 3]), 3)
+
+            def test_median_even_length(self):
+                # The known bug: the buggy implementation returns the lower
+                # middle element instead of the mean of the two middle elements.
+                self.assertEqual(median([1, 2, 3, 4]), 2.5)
+
+            def test_median_rejects_empty(self):
+                with self.assertRaises(ValueError):
+                    median([])
+
+
+        if __name__ == "__main__":
+            unittest.main()
+    verification:
+      - verifier: file
+        description: the test file exists and defines the even-length case
+        params:
+          path: test_stats.py
+          min_bytes: 100
+          contains: ["def test_median_even_length"]
+
+  - task_id: task_write_buggy_module
+    description: Write the initial (buggy) implementation of the statistics module.
+    tool: fs.write
+    depends_on: [task_write_tests]
+    expected_output: stats.py with an off-by-one median bug
+    tool_input:
+      path: stats.py
+      content: |
+        """Small statistics helpers."""
+
+
+        def median(values):
+            """Return the median of `values`.
+
+            BUG: for even-length input this returns the lower middle element
+            instead of the mean of the two middle elements.
+            """
+            if not values:
+                raise ValueError("median() requires at least one value")
+            ordered = sorted(values)
+            return ordered[(len(ordered) - 1) // 2]
+    verification:
+      - verifier: file
+        description: the module exists
+        params:
+          path: stats.py
+          min_bytes: 50
+          contains: ["def median"]
+
+  - task_id: task_reproduce_failure
+    description: Reproduce the bug by running the tests and requiring a failure.
+    tool: shell.run
+    depends_on: [task_write_buggy_module]
+    expected_output: the suite exits non-zero, proving the bug is real
+    risk: MEDIUM
+    tool_input:
+      command: ["python", "-m", "unittest", "-v", "test_stats"]
+      expect_exit_code: 1
+    verification:
+      - verifier: command
+        description: the suite genuinely fails before the fix (evidence the bug exists)
+        params:
+          command: ["python", "-m", "unittest", "-v", "test_stats"]
+          expect_exit_code: 1
+          # Prove the failure is the BUG, not a broken environment: an
+          # ImportError or a missing module also exits non-zero.
+          stdout_contains:
+            - "test_median_even_length"
+            - "Ran 3 tests"
+            - "FAILED (failures=1)"
+            - "2 != 2.5"
+          stdout_excludes: ["No module named", "ImportError", "ModuleNotFoundError"]
+
+  - task_id: task_apply_fix
+    description: Fix the median implementation for even-length input.
+    tool: fs.write
+    depends_on: [task_reproduce_failure]
+    expected_output: stats.py with a correct median
+    tool_input:
+      path: stats.py
+      content: |
+        """Small statistics helpers."""
+
+
+        def median(values):
+            """Return the median of `values`.
+
+            For an even number of values the median is the mean of the two
+            middle elements.
+            """
+            if not values:
+                raise ValueError("median() requires at least one value")
+            ordered = sorted(values)
+            middle = len(ordered) // 2
+            if len(ordered) % 2 == 1:
+                return ordered[middle]
+            return (ordered[middle - 1] + ordered[middle]) / 2
+    verification:
+      - verifier: file
+        description: the fix is present in the source
+        params:
+          path: stats.py
+          matches: ["ordered\\[middle - 1\\] \\+ ordered\\[middle\\]"]
+
+  - task_id: task_prove_fixed
+    description: Prove the fix by requiring the whole suite to pass.
+    tool: shell.run
+    depends_on: [task_apply_fix]
+    expected_output: the suite exits 0 with 3 tests passing
+    risk: MEDIUM
+    tool_input:
+      command: ["python", "-m", "unittest", "-v", "test_stats"]
+      expect_exit_code: 0
+    verification:
+      - verifier: command
+        description: the full suite passes after the fix
+        params:
+          command: ["python", "-m", "unittest", "-v", "test_stats"]
+          expect_exit_code: 0
+          stdout_contains: ["Ran 3 tests", "OK"]
+          stdout_excludes: ["FAILED", "No module named"]
+
+  - task_id: task_report
+    description: Record a machine-readable summary of the fix.
+    tool: fs.write
+    depends_on: [task_prove_fixed]
+    expected_output: fix-summary.json describing the defect and the evidence
+    tool_input:
+      path: fix-summary.json
+      content: |
+        {
+          "defect": "median() returned the lower middle element for even-length input",
+          "root_cause": "integer index (len - 1) // 2 instead of averaging the two middle values",
+          "fix": "average ordered[middle - 1] and ordered[middle] when the length is even",
+          "evidence": [
+            "unittest exited 1 with FAILED (failures=1) before the fix (task_reproduce_failure)",
+            "unittest exited 0 with OK, 3 tests run, after the fix (task_prove_fixed)"
+          ],
+          "files_changed": ["stats.py"]
+        }
+    verification:
+      - verifier: schema
+        description: the summary is valid JSON with the required fields
+        params:
+          path: fix-summary.json
+          required_keys: ["defect", "root_cause", "fix", "evidence", "files_changed"]
