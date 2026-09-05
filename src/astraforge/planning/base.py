@@ -55,8 +55,21 @@ def plan_from_mapping(data: dict[str, Any], goal: Goal) -> Plan:
 def load_plan_file(path: str | Path, goal: Goal) -> Plan:
     """Load a plan from a ``.json``, ``.yaml`` or ``.yml`` file."""
     file = Path(path)
-    text = file.read_text(encoding="utf-8")
-    data = json.loads(text) if file.suffix == ".json" else yaml.safe_load(text)
+    try:
+        text = file.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PlanningError(f"cannot read plan file {file}: {exc}") from exc
+
+    try:
+        # safe_load refuses arbitrary object construction, so a plan file cannot
+        # execute code. Malformed input becomes a PlanningError rather than
+        # leaking a parser exception to the caller.
+        data = json.loads(text) if file.suffix == ".json" else yaml.safe_load(text)
+    except json.JSONDecodeError as exc:
+        raise PlanningError(f"{file} is not valid JSON: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise PlanningError(f"{file} is not valid YAML: {exc}") from exc
+
     if not isinstance(data, dict):
         raise PlanningError(f"{file} must contain a mapping at the top level")
     return plan_from_mapping(data, goal)

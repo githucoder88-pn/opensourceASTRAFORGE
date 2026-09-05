@@ -64,7 +64,7 @@ point, one place to audit, one place to test.
 workspace.resolve("../../etc/passwd")   # WorkspaceEscapeError
 ```
 
-## No shell injection
+## No implicit shell
 
 `shell.run` takes an argv list and never uses `shell=True`:
 
@@ -73,15 +73,28 @@ tool_input:
   command: ["echo", "a; echo pwned"]   # one argument, not two commands
 ```
 
-`;`, `|`, `&&` and backticks are ordinary characters.
+Within an argv element, `;`, `|`, `&&` and backticks are ordinary characters.
+
+**Scope of the guarantee.** A plan can still ask for a shell explicitly:
+
+```yaml
+command: ["sh", "-c", "make build && make test"]   # a real shell, by request
+```
+
+That is permitted, and then normal shell rules apply. The guarantee is that
+AstraForge never *adds* an interpreter behind your back — not that a shell can
+never run. Plan files are executable input; review them with `--dry-run`.
 
 ## Secrets
 
 - Config stores the **name** of an env var, never a value.
-- Redaction runs on tool output, events, reports and artifacts — matching known
-  key shapes (OpenAI, GitHub, Slack, AWS, PEM blocks) **and** the live values of
-  env vars named like `*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`,
-  `*CREDENTIAL*`.
+- Redaction runs on tool output, **command arguments**, events, reports and
+  artifacts — matching known credential shapes (OpenAI, Anthropic, GitHub,
+  Google, Hugging Face, Slack, AWS, JWTs, `Authorization` headers, URL-embedded
+  passwords, PEM blocks) **and** the live values of env vars named like
+  `*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*`.
+- Short or common env values are deliberately ignored, because over-redaction
+  destroys the evidence the report exists to provide.
 - Subprocesses receive a minimal environment (`PATH`, `HOME`, locale, `TMPDIR`).
   **Your API keys are not inherited by commands the agent runs.**
 
@@ -96,6 +109,11 @@ limits:
   max_total_tool_calls: 100
   max_runtime_s: 900
 ```
+
+Memory is bounded as well: subprocess output streams through a capped buffer, so
+a runaway command is killed rather than allowed to exhaust RAM. Truncation is
+reported as evidence. When a budget stops a run, unfinished tasks become
+`CANCELLED` so the persisted record stays truthful.
 
 Additionally, failure classes carry their own recoverability. `POLICY_BLOCK`,
 `HUMAN_REJECTION`, `AUTHORIZATION_FAILURE` and `DEPENDENCY_FAILURE` are **never

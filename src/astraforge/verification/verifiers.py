@@ -9,8 +9,22 @@ import subprocess
 from typing import Any
 
 from astraforge.models.core import Evidence, VerificationResult
+from astraforge.security.redaction import redact
 from astraforge.tools.interpreter import resolve_interpreter
+from astraforge.tools.process import OutputLimitExceeded, run_bounded
 from astraforge.verification.base import VerificationContext, Verifier
+
+
+def _verification_env() -> dict[str, str]:
+    """Minimal environment for verification subprocesses.
+
+    Mirrors the engine's tool environment: secrets are never forwarded to a
+    child process, including one spawned by a verifier.
+    """
+    import os
+
+    keep = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT")
+    return {k: v for k, v in os.environ.items() if k in keep}
 
 
 class FileVerifier(Verifier):
@@ -79,23 +93,35 @@ class CommandVerifier(Verifier):
         expected = int(params.get("expect_exit_code", 0))
         timeout = int(params.get("timeout_s", 300))
         try:
-            proc = subprocess.run(
-                argv, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
+            proc = run_bounded(
+                argv,
+                cwd=cwd,
+                env=_verification_env(),
+                timeout_s=timeout,
             )
         except FileNotFoundError:
-            return self.failed([f"command not found: {argv[0]}"])
+            return self.failed([f"command not found: {redact(argv[0])}"])
+        except PermissionError:
+            return self.failed([f"not executable: {redact(argv[0])}"])
         except subprocess.TimeoutExpired:
             return self.failed([f"verification command timed out after {timeout}s"])
+        except OutputLimitExceeded as exc:
+            return self.failed([str(exc)])
 
-        combined = (proc.stdout + proc.stderr).strip()
+        combined = redact((proc.stdout + proc.stderr).strip())
+        # Arguments can carry credentials just as easily as output can, and this
+        # string goes straight into the report and the event log.
+        shown = redact(" ".join(argv))
         failures: list[str] = []
         checks = 1
-        evidence = [f"`{' '.join(argv)}` exited {proc.returncode}"]
+        evidence = [f"`{shown}` exited {proc.exit_code}"]
+        if proc.truncated:
+            evidence.append("output was truncated; only the tail was inspected")
         if combined:
             evidence.append(f"output: {combined[-400:]}")
-        if proc.returncode != expected:
+        if proc.exit_code != expected:
             failures.append(
-                f"`{' '.join(argv)}` exited {proc.returncode}, expected {expected}: "
+                f"`{shown}` exited {proc.exit_code}, expected {expected}: "
                 f"{combined[-800:]}"
             )
         for needle in params.get("stdout_contains") or []:
@@ -208,18 +234,35 @@ class ToolOutputVerifier(Verifier):
 
 
 class HumanApprovalVerifier(Verifier):
-    """Records that a human approved the result.
+    """Requires that a human approved this task.
 
-    The engine resolves approvals through the approval gate before the task
-    runs; this verifier turns that decision into evidence in the report.
+    Approvals are resolved by the engine's approval gate *before* the tool runs;
+    this verifier turns that decision into evidence in the report.
+
+    Important consequence: an approval is only requested when the task's
+    effective risk reaches the policy's ``approval_at_or_above`` threshold. A
+    LOW-risk task carrying this verifier would otherwise fail with a confusing
+    "no approval recorded" message, so the failure explains how to fix it.
     """
 
     name = "human_approval"
-    description = "Requires a recorded human approval for the task."
+    description = (
+        "Requires a recorded human approval. The task's risk must reach the "
+        "policy approval threshold, otherwise no approval is ever requested."
+    )
 
     def verify(self, params: dict[str, Any], ctx: VerificationContext) -> VerificationResult:
         env = ctx.env or {}
-        key = f"approval:{ctx.task_id}"
-        if env.get(key) == "granted":
+        if env.get(f"approval:{ctx.task_id}") == "granted":
             return self.passed([f"human approval recorded for {ctx.task_id}"])
-        return self.failed([f"no human approval recorded for {ctx.task_id}"])
+        if env.get(f"approval_requested:{ctx.task_id}") == "yes":
+            return self.failed(
+                [f"human approval was requested but not granted for {ctx.task_id}"]
+            )
+        return self.failed(
+            [
+                f"no approval was ever requested for {ctx.task_id}: the task's risk "
+                "did not reach the policy approval threshold. Raise the task's "
+                "`risk` (e.g. to HIGH) or lower `security.approval_at_or_above`."
+            ]
+        )

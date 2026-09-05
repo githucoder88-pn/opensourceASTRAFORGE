@@ -7,6 +7,49 @@ Pre-1.0, breaking changes may occur in any minor release.
 
 ## [Unreleased]
 
+### Fixed
+
+Findings from a pre-release independent audit.
+
+- **Unbounded subprocess memory (critical).** `subprocess.run(capture_output=True)`
+  buffered a child's entire output in memory, so a runaway command could
+  OOM-kill the engine before truncation applied — surfacing as an unclassified
+  crash with no captured evidence. Output now streams through a capped buffer
+  (`astraforge.tools.process`); memory is bounded regardless of volume, the tail
+  is preserved, truncation is reported as evidence, and a process that floods
+  past the hard limit is killed immediately rather than waiting out its timeout.
+- **Credentials leaked through command arguments (high).** The shell tool and
+  command verifier redacted process *output* but echoed raw `argv` into
+  evidence, reports and `events.jsonl`. Arguments are now redacted too.
+- **Redaction gaps (high).** Added Google, Hugging Face, Anthropic, fine-grained
+  GitHub PAT, JWT, `Authorization` header, URL-embedded password and
+  `key = value` credential shapes. Short and common environment values are no
+  longer used as redaction needles, since over-redaction destroys evidence.
+  Environment scanning is cached and ~2x faster.
+- **Verifier subprocesses inherited the full environment (high).** They now get
+  the same minimal environment as tool subprocesses, so secrets are not exposed
+  to verification commands.
+- **Stranded task states (medium).** A run aborted by a budget left tasks
+  persisted as `RUNNING`/`PENDING`; `run.json` claimed work was in flight after
+  the process had exited. Unfinished tasks are now `CANCELLED`.
+- **`human_approval` on a low-risk task was a silent trap (medium).** It failed
+  with an unexplained "no approval recorded" because no gate had triggered. The
+  failure now names the cause and the two ways to fix it.
+- **Leaky plan-file errors (medium).** Malformed YAML/JSON raised raw parser
+  exceptions instead of `PlanningError`.
+- **Binary subprocess output crashed the shell tool (medium).**
+- **`make` targets required an activated virtualenv (medium).** They now resolve
+  tools through the active interpreter and fail with actionable guidance.
+  Added `python -m astraforge` as an entry point.
+
+### Changed
+
+- Removed `TaskStatus.READY` and `RunStatus.AWAITING_APPROVAL`, which were
+  declared but never assigned — they implied states the engine never enters.
+- Documentation no longer claims model-generated strings "cannot chain
+  commands". The accurate guarantee is that AstraForge never adds an interpreter
+  you did not ask for; a plan may still invoke `sh -c` deliberately.
+
 ## [0.1.0] — 2026-09-05
 
 First release. The complete core loop —
@@ -63,7 +106,7 @@ end, offline and deterministically.
 
 **Project**
 - Four reproducible examples, all run by the test suite
-- 187 tests across unit, integration and end-to-end layers
+- 230 tests across unit, integration and end-to-end layers
 - `mypy --strict` and `ruff` clean
 - Architecture, security, contribution, governance and roadmap documentation
 

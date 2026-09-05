@@ -14,7 +14,7 @@ GOAL → PLAN → EXECUTION → VERIFICATION → EVIDENCE → ARTIFACT
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 
 > **Status: v0.1, early but real.** The core loop works end to end, is covered
-> by 187 tests, and every example in this README is executed by the test suite.
+> by 230 tests, and every example in this README is executed by the test suite.
 > It is not yet a finished product — see [Honest limitations](#honest-limitations).
 >
 > The GitHub Actions pipeline is written and passes locally, but sits in
@@ -322,8 +322,11 @@ security:
 **Containment.** Every path resolves through a `Workspace` rooted at the run
 directory. `../../etc/passwd` raises `WorkspaceEscapeError` — [tested](tests/unit/test_security.py).
 
-**No shell injection.** `shell.run` takes an argv list and never uses
-`shell=True`, so model-generated strings cannot chain commands.
+**No implicit shell.** `shell.run` takes an argv list and never uses
+`shell=True`, so AstraForge never adds a shell you did not ask for: in
+`["echo", "a; rm -rf /"]` the `;` is literal data. Note the honest limit — a
+plan can still request a shell explicitly with `["sh", "-c", "..."]`, and then
+normal shell rules apply. Review plans you did not write (`--dry-run`).
 
 **Secrets.** Redacted from events, reports and artifacts by pattern *and* by
 matching live environment variables. Subprocesses get a minimal environment —
@@ -440,12 +443,18 @@ Things this README does **not** claim:
 
 ```bash
 make install     # editable install with dev extras
-make test        # 187 tests
+make test        # full suite
+make test-fast   # skip subprocess-heavy tests
 make lint        # ruff
 make typecheck   # mypy --strict, zero errors
 make check       # all of the above
 make demo        # run the flagship example
 ```
+
+Targets resolve tools through the active interpreter, so they work with or
+without an activated virtualenv. Point them elsewhere with
+`make check PY=/path/to/venv/bin/python`. If the `astraforge` script is not on
+your `PATH`, `python -m astraforge` is equivalent.
 
 Quality bar for merging: ruff clean, `mypy --strict` clean, tests pass,
 new behaviour covered by a test that can actually fail.

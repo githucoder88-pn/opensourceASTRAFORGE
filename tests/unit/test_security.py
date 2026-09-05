@@ -115,3 +115,70 @@ class TestPolicy:
         granted = base.grant(Capability.NETWORK_REQUEST)
         assert granted.evaluate({Capability.NETWORK_REQUEST}, RiskLevel.LOW).allowed
         assert not base.evaluate({Capability.NETWORK_REQUEST}, RiskLevel.LOW).allowed
+
+
+class TestRedactionCoverage:
+    """Regression suite for audit findings: credential shapes that leaked."""
+
+    @pytest.mark.parametrize(
+        ("label", "secret"),
+        [
+            ("openai project", "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890ABCD"),
+            ("anthropic", "sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890"),
+            ("google api", "AIzaSyA1234567890abcdefghijklmnopqrstu"),
+            ("huggingface", "hf_abcdefghijklmnopqrstuvwxyz1234567890"),
+            ("github pat", "github_pat_11ABCDEFG0abcdefghijklmnop"),
+            ("aws access key", "AKIAIOSFODNN7EXAMPLE"),
+            ("jwt", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghij"),
+        ],
+    )
+    def test_credential_shapes_are_redacted(self, label: str, secret: str) -> None:
+        assert secret not in redact(f"the value is {secret} ok")
+
+    def test_authorization_header_is_redacted(self) -> None:
+        assert "abcdef1234567890xyz" not in redact(
+            "Authorization: Bearer abcdef1234567890xyz"
+        )
+
+    def test_url_embedded_password_is_redacted_but_url_stays_readable(self) -> None:
+        out = redact("clone https://user:hunter2password@example.com/repo.git")
+        assert "hunter2password" not in out
+        assert "example.com/repo.git" in out  # still diagnosable
+
+    def test_key_value_assignment_is_redacted(self) -> None:
+        assert "abcdef1234567890xyz" not in redact('api_key = "abcdef1234567890xyz"')
+
+    @pytest.mark.parametrize(
+        "benign",
+        [
+            "run the test suite",
+            "deploy to production now",
+            "the median of [1, 2, 3, 4] is 2.5",
+            "src/astraforge/tools/shell.py",
+            "https://github.com/org/repo.git",
+        ],
+    )
+    def test_ordinary_text_is_not_damaged(self, benign: str) -> None:
+        """Over-redaction destroys evidence; it is a bug, not extra safety."""
+        assert redact(benign) == benign
+
+    def test_short_env_values_are_ignored(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Redacting a short common value would corrupt unrelated output."""
+        monkeypatch.setenv("SOME_TOKEN", "test")
+        assert redact("please test the change") == "please test the change"
+
+    def test_common_config_words_are_ignored(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DEPLOY_KEY_NAME", "production")
+        assert redact("deploying to production") == "deploying to production"
+
+    def test_new_env_secrets_are_picked_up(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The env cache must invalidate, or a late-loaded key stops being redacted."""
+        assert redact("value latesecretvalue123") == "value latesecretvalue123"
+        monkeypatch.setenv("LATE_API_KEY", "latesecretvalue123")
+        assert "latesecretvalue123" not in redact("value latesecretvalue123")

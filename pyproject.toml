@@ -66,7 +66,8 @@ ignore = ["S603", "S607", "RUF012"]
 [tool.ruff.lint.per-file-ignores]
 # Typer's declarative API requires calling Option()/Argument() in defaults.
 "src/astraforge/cli/main.py" = ["B008"]
-"tests/*" = ["S101", "S108"]
+# S101 assert, S108 /tmp paths, S105/S106 fake credentials used as test fixtures.
+"tests/*" = ["S101", "S105", "S106", "S108"]
 "examples/*" = ["S101"]
 
 [tool.mypy]

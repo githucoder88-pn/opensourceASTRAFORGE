@@ -367,3 +367,67 @@ class TestPersistence:
         second = engine.run(Goal(description="another goal"))
         assert first.run.run_id != second.run.run_id
         assert first.workspace.root != second.workspace.root
+
+
+class TestRunTermination:
+    """Audit regression: a cut-short run must not persist non-terminal statuses."""
+
+    def test_budget_abort_cancels_unfinished_tasks(self, make_engine, goal: Goal) -> None:
+        plan = _plan(*[_write(f"t{i}", f"f{i}.md", "x") for i in range(5)])
+        engine = make_engine(StaticPlanner(plan=plan))
+        engine.config.limits.max_total_tool_calls = 2
+        result = engine.run(goal)
+
+        assert result.run.status is RunStatus.FAILED
+        stranded = [t.task_id for t in result.tasks if not t.status.terminal]
+        assert not stranded, f"tasks left in a non-terminal state: {stranded}"
+
+    def test_cancelled_state_survives_a_reload(self, make_engine, goal: Goal) -> None:
+        """run.json must not claim a task is RUNNING after the process exited."""
+        plan = _plan(*[_write(f"t{i}", f"f{i}.md", "x") for i in range(5)])
+        engine = make_engine(StaticPlanner(plan=plan))
+        engine.config.limits.max_total_tool_calls = 1
+        result = engine.run(goal)
+
+        reloaded = engine.store.load_run(result.run.run_id)
+        assert reloaded.plan is not None
+        assert all(t.status.terminal for t in reloaded.plan.tasks)
+        assert any(t.status is TaskStatus.CANCELLED for t in reloaded.plan.tasks)
+
+
+class TestApprovalVerifierGuidance:
+    """Audit regression: `human_approval` on a low-risk task was a silent trap."""
+
+    def _task(self, risk: RiskLevel) -> Task:
+        return Task(
+            task_id="t_approve",
+            description="needs sign-off",
+            tool="fs.write",
+            tool_input={"path": "a.md", "content": "x"},
+            risk=risk,
+            verification=[VerificationSpec(verifier="human_approval")],
+        )
+
+    def test_low_risk_failure_explains_how_to_fix_it(
+        self, make_engine, goal: Goal
+    ) -> None:
+        engine = make_engine(StaticPlanner(plan=_plan(self._task(RiskLevel.LOW))))
+        result = engine.run(goal)
+
+        failures = [
+            f
+            for a in result.tasks[0].attempts
+            for v in a.verifications
+            for f in v.failures
+        ]
+        assert failures
+        message = " ".join(failures)
+        # The message must name the cause and the remedy, not just the symptom.
+        assert "approval threshold" in message
+        assert "risk" in message and "approval_at_or_above" in message
+
+    def test_high_risk_with_approval_passes(self, make_engine, goal: Goal) -> None:
+        engine = make_engine(StaticPlanner(plan=_plan(self._task(RiskLevel.HIGH))))
+        engine.policy = Policy()
+        engine.approval_gate = ScriptedGate(decisions={"t_approve": True})
+        assert engine.run(goal).tasks[0].status is TaskStatus.COMPLETED

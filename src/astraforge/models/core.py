@@ -51,8 +51,14 @@ _RISK_ORDER = {
 
 
 class TaskStatus(str, Enum):
+    """Lifecycle of a task.
+
+    Readiness is a derived property (all dependencies COMPLETED) rather than a
+    stored status, so there is no READY member: a task goes straight from
+    PENDING to RUNNING when the engine picks it up.
+    """
+
     PENDING = "PENDING"
-    READY = "READY"
     RUNNING = "RUNNING"
     BLOCKED = "BLOCKED"
     FAILED = "FAILED"
@@ -67,9 +73,14 @@ class TaskStatus(str, Enum):
 
 
 class RunStatus(str, Enum):
+    """Lifecycle of a run.
+
+    Approval waits happen inside a task, so a run has no AWAITING_APPROVAL
+    state; it stays RUNNING while the gate is open.
+    """
+
     PLANNING = "PLANNING"
     RUNNING = "RUNNING"
-    AWAITING_APPROVAL = "AWAITING_APPROVAL"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"

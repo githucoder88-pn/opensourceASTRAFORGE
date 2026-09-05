@@ -159,3 +159,37 @@ def test_the_shipped_example_plan_is_valid(tools: ToolRegistry, goal: Goal) -> N
     plan = StaticPlanner(path=path).plan(goal, tools)
     assert len(plan.tasks) == 6
     assert all(t.verification for t in plan.tasks)
+
+
+class TestPlanFileSafety:
+    """Audit regression: plan files are untrusted input."""
+
+    def test_yaml_cannot_execute_code(self, tmp_path, goal: Goal) -> None:
+        """safe_load must refuse object construction, cleanly."""
+        marker = tmp_path / "pwned.txt"
+        path = tmp_path / "evil.yaml"
+        path.write_text(
+            f"!!python/object/apply:os.system ['touch {marker}']\n", encoding="utf-8"
+        )
+        with pytest.raises(PlanningError):
+            load_plan_file(path, goal)
+        assert not marker.exists(), "plan file executed code"
+
+    def test_malformed_yaml_raises_planning_error_not_a_parser_error(
+        self, tmp_path, goal: Goal
+    ) -> None:
+        """Callers handle PlanningError; a leaked yaml.YAMLError would crash them."""
+        path = tmp_path / "bad.yaml"
+        path.write_text("tasks: [unclosed\n", encoding="utf-8")
+        with pytest.raises(PlanningError, match="not valid YAML"):
+            load_plan_file(path, goal)
+
+    def test_malformed_json_raises_planning_error(self, tmp_path, goal: Goal) -> None:
+        path = tmp_path / "bad.json"
+        path.write_text('{"tasks": [,]}', encoding="utf-8")
+        with pytest.raises(PlanningError, match="not valid JSON"):
+            load_plan_file(path, goal)
+
+    def test_missing_plan_file_raises_planning_error(self, tmp_path, goal: Goal) -> None:
+        with pytest.raises(PlanningError, match="cannot read plan file"):
+            load_plan_file(tmp_path / "nope.yaml", goal)

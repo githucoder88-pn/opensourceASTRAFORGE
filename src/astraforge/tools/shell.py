@@ -1,8 +1,13 @@
 """Shell execution, confined to the workspace and bounded by a timeout.
 
-This tool intentionally does *not* use ``shell=True``: commands are given as an
-argument list, so there is no shell metacharacter interpretation and no
-accidental command chaining from model-generated strings.
+This tool does **not** use ``shell=True``: commands are given as an argument
+list, so the tool itself never interprets shell metacharacters. Note that a plan
+may still invoke a shell explicitly (``["sh", "-c", "..."]``); the guarantee is
+that AstraForge does not add an interpreter you did not ask for, not that a
+shell can never run. See ``docs/concepts/safety.md``.
+
+Output is captured through a bounded reader so a runaway command cannot exhaust
+memory — see :mod:`astraforge.tools.process`.
 """
 
 from __future__ import annotations
@@ -16,8 +21,13 @@ from astraforge.security.capabilities import Capability
 from astraforge.security.redaction import redact
 from astraforge.tools.base import Tool, ToolContext, ToolResult
 from astraforge.tools.interpreter import resolve_interpreter
+from astraforge.tools.process import (
+    DEFAULT_MAX_CAPTURE,
+    OutputLimitExceeded,
+    run_bounded,
+)
 
-MAX_CAPTURE = 20_000
+MAX_CAPTURE = DEFAULT_MAX_CAPTURE
 
 
 class ShellTool(Tool):
@@ -26,7 +36,7 @@ class ShellTool(Tool):
     name = "shell.run"
     description = (
         "Run a command inside the workspace. Provide argv as a list, or a simple "
-        "command string which is split with shlex (no shell metacharacters)."
+        "command string which is split with shlex."
     )
     capabilities = frozenset({Capability.SHELL_EXECUTE})
     risk = RiskLevel.HIGH
@@ -54,44 +64,62 @@ class ShellTool(Tool):
         expected = int(payload.get("expect_exit_code", 0))
 
         try:
-            proc = subprocess.run(
+            proc = run_bounded(
                 argv,
                 cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
                 env={**ctx.env, "PATH": ctx.env.get("PATH", "/usr/bin:/bin")},
+                timeout_s=timeout,
             )
         except FileNotFoundError:
             return ToolResult.failure(
-                f"command not found: {argv[0]}", FailureClass.ENVIRONMENT_FAILURE
+                f"command not found: {redact(argv[0])}", FailureClass.ENVIRONMENT_FAILURE
+            )
+        except PermissionError:
+            return ToolResult.failure(
+                f"not executable: {redact(argv[0])}", FailureClass.ENVIRONMENT_FAILURE
             )
         except subprocess.TimeoutExpired:
             return ToolResult.failure(
-                f"command timed out after {timeout}s: {' '.join(argv)}",
+                f"command timed out after {timeout}s: {redact(' '.join(argv))}",
                 FailureClass.TIMEOUT,
             )
+        except OutputLimitExceeded as exc:
+            return ToolResult.failure(str(exc), FailureClass.ENVIRONMENT_FAILURE)
 
-        stdout = redact(proc.stdout[-MAX_CAPTURE:])
-        stderr = redact(proc.stderr[-MAX_CAPTURE:])
+        stdout = redact(proc.stdout)
+        stderr = redact(proc.stderr)
+        # argv is echoed into evidence, the event log and the report, so a
+        # credential passed as an argument must be redacted like any output.
+        shown_argv = redact(argv)
+        shown = " ".join(shown_argv)
         output = {
-            "argv": argv,
-            "exit_code": proc.returncode,
+            "argv": shown_argv,
+            "exit_code": proc.exit_code,
             "stdout": stdout,
             "stderr": stderr,
+            "truncated": proc.truncated,
         }
         evidence = [
             Evidence(
                 kind="command.executed",
-                summary=f"`{' '.join(argv)}` exited {proc.returncode}",
+                summary=f"`{shown}` exited {proc.exit_code}",
                 detail=(stdout or stderr)[-2000:],
-                data={"exit_code": proc.returncode},
+                data={"exit_code": proc.exit_code},
             )
         ]
-        if proc.returncode != expected:
+        if proc.truncated:
+            evidence.append(
+                Evidence(
+                    kind="command.truncated",
+                    summary=(
+                        f"output exceeded {MAX_CAPTURE} characters; "
+                        "only the tail was captured"
+                    ),
+                )
+            )
+        if proc.exit_code != expected:
             return ToolResult.failure(
-                f"command exited {proc.returncode} (expected {expected})",
+                f"command exited {proc.exit_code} (expected {expected})",
                 FailureClass.TOOL_FAILURE,
                 output=output,
                 evidence=evidence,

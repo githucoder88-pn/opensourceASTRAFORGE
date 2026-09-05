@@ -26,7 +26,7 @@ example use.
 This makes several valuable properties true at once:
 
 1. **`pip install` → working demo, in one command.** No signup, no key, no cost.
-2. **The test suite is hermetic.** 187 tests, no network, no credentials, no
+2. **The test suite is hermetic.** 230 tests, no network, no credentials, no
    flakiness, no bill. CI needs no secrets — so forks and first-time
    contributors get green CI immediately.
 3. **Examples are reproducible.** Two runs of the same plan produce identical

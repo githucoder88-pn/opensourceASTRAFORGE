@@ -155,6 +155,9 @@ class Engine:
         except BudgetExceeded as exc:
             run.status = RunStatus.FAILED
             run.notes.append(str(exc))
+            # Leave no task claiming to be RUNNING after the process stops: a
+            # persisted non-terminal status is a lie about the world.
+            self._cancel_unfinished(run.plan, bus, reason=str(exc))
             bus.emit(EventType.RUN_FAILED, str(exc))
         else:
             failed = [t for t in run.plan.tasks if t.status is not TaskStatus.COMPLETED]
@@ -229,6 +232,22 @@ class Engine:
                     task_id=task.task_id,
                     payload={"blocked_by": blockers},
                 )
+
+    @staticmethod
+    def _cancel_unfinished(plan: Plan | None, bus: EventBus, reason: str) -> None:
+        """Move every non-terminal task to CANCELLED when a run is cut short."""
+        if plan is None:
+            return
+        for task in plan.tasks:
+            if task.status.terminal:
+                continue
+            task.status = TaskStatus.CANCELLED
+            bus.emit(
+                EventType.RUN_CANCELLED,
+                f"task cancelled: {reason}",
+                task_id=task.task_id,
+                payload={"reason": reason},
+            )
 
     @staticmethod
     def _next_ready(plan: Plan) -> Task | None:
@@ -372,6 +391,7 @@ class Engine:
                 task_id=task.task_id,
                 payload={"tool": tool.name, "risk": risk.value},
             )
+            state[f"approval_requested:{task.task_id}"] = "yes"
             granted = self.approval_gate.request(
                 ApprovalRequest(
                     task_id=task.task_id,

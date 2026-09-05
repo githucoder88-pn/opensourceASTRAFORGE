@@ -72,17 +72,33 @@ Every path goes through `Workspace.resolve()`, which rejects anything resolving
 outside the run directory — including `../`, symlink tricks and absolute paths.
 One choke point, one place to audit.
 
-### No shell injection
+### No implicit shell
 
-`shell.run` accepts an argv list and never uses `shell=True`. `;`, `|`, `&&` and
-backticks are ordinary characters. String commands are split with `shlex`.
+`shell.run` accepts an argv list and never uses `shell=True`. String commands are
+split with `shlex`. Within a single argv element, `;`, `|`, `&&` and backticks
+are ordinary characters, so a model-generated *argument* cannot become a second
+command.
+
+**The limit of this guarantee:** a plan may invoke a shell deliberately, as
+`["sh", "-c", "cmd1 && cmd2"]`. AstraForge does not forbid that — it is
+sometimes necessary — but at that point the shell interprets the string
+normally. The property is *"no interpreter you did not ask for"*, not *"a shell
+can never run"*. Treat plan files as executable input and review them with
+`--dry-run`.
 
 ### Secret handling
 
 - Config stores the **name** of an environment variable, never a value.
-- Redaction runs on tool output, events, reports and artifacts, matching both
-  known key shapes (OpenAI, GitHub, Slack, AWS, PEM blocks) and the live values
-  of any env var whose name contains `KEY`/`TOKEN`/`SECRET`/`PASSWORD`/`CREDENTIAL`.
+- Redaction runs on tool output, **command arguments**, events, reports and
+  artifacts. It matches known credential shapes — OpenAI (including project and
+  service-account keys), Anthropic, GitHub (classic and fine-grained), Google,
+  Hugging Face, Slack, AWS, JWTs, `Authorization` headers, URL-embedded
+  passwords, `key = value` assignments and PEM private-key blocks — plus the
+  live values of env vars named like `*KEY*`, `*TOKEN*`, `*SECRET*`,
+  `*PASSWORD*`, `*CREDENTIAL*`, `*AUTH*`, `*API*`.
+- Short and common env values (under 12 characters, or words like `production`)
+  are **not** used as redaction needles: over-redaction destroys evidence and is
+  treated as a bug, not as extra safety.
 - Subprocesses receive a minimal environment (`PATH`, `HOME`, locale, `TMPDIR`).
   **Your API keys are not inherited by commands the agent runs.**
 - `.astraforge/` is git-ignored by `astraforge init`.
@@ -94,6 +110,15 @@ AstraForge at a workspace containing credentials.
 
 `max_task_attempts`, `max_total_tool_calls` and `max_runtime_s` are enforced by
 the engine. Unrecoverable failure classes are never retried.
+
+**Output is bounded too.** Subprocess output is streamed through a capped ring
+buffer rather than accumulated in memory, so a command that writes gigabytes
+cannot exhaust RAM and take the engine down. Only the tail is retained, and any
+truncation is recorded as evidence rather than hidden. A process that floods
+past the hard stream limit is killed and reported as an environment failure.
+
+When a run is cut short by a budget, every unfinished task is moved to
+`CANCELLED`. A persisted run record never claims a task is still `RUNNING`.
 
 ### Auditability
 
